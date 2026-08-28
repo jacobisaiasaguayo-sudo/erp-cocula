@@ -8,6 +8,7 @@
 <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
@@ -117,6 +118,10 @@ input.cell-edit:focus{outline:2px solid var(--primary);border-radius:3px;backgro
 .login-card .role-btn{flex:1;padding:.5rem;border:2px solid var(--border);border-radius:8px;text-align:center;cursor:pointer;font-weight:600;font-size:.8rem;transition:.2s;}
 .login-card .role-btn.selected{border-color:var(--primary);background:#eef2ff;color:var(--primary);}
 .login-card .error-text{color:var(--danger);font-size:.78rem;min-height:1.2em;}
+.login-card .auth-switch a{color:var(--primary);font-weight:600;cursor:pointer;}
+.login-card .auth-switch a:hover{text-decoration:underline;}
+.auth-loading{opacity:.65;pointer-events:none;position:relative;}
+.auth-loading::after{content:'⏳';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.2rem;animation:pulse .8s infinite;}
 
 /* Firebase setup modal */
 .fb-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1100;display:flex;align-items:center;justify-content:center;}
@@ -155,39 +160,51 @@ input.cell-edit:focus{outline:2px solid var(--primary);border-radius:3px;backgro
   <div class="login-card">
     <h2>📊 Dashboard de Ventas</h2>
     <p class="group-name">Promaquila de Cocula</p>
-    <div id="loginSetup">
-      <p style="font-size:.8rem;color:var(--text2);margin-bottom:.6rem;">Configura tu acceso por primera vez:</p>
-      <input id="setupPass" type="password" placeholder="Crear contraseña (mín. 4 caracteres)">
-      <input id="setupPass2" type="password" placeholder="Confirmar contraseña">
-    </div>
-    <div class="role-select" id="loginRoleSelect">
-      <div class="role-btn" onclick="selectLoginRole('admin')" id="roleBtnAdmin">👨‍💼 Administrador</div>
-      <div class="role-btn" onclick="selectLoginRole('consultor')" id="roleBtnConsultor">👁 Consultor</div>
-    </div>
-    <p class="error-text" id="setupError"></p>
-    <button class="btn btn-primary" id="loginEnter" onclick="enterDashboard()">Entrar</button>
-    <div id="loginPass" style="display:none;margin-top:.5rem;">
-      <p style="font-size:.8rem;color:var(--text2);margin-bottom:.5rem;">Ya tienes acceso configurado:</p>
-      <input id="loginPassInput" type="password" placeholder="Contraseña">
-      <div class="role-select" id="loginRoleSelect2">
-        <div class="role-btn" onclick="selectLoginRole2('admin')" id="roleBtn2Admin">👨‍💼 Administrador</div>
-        <div class="role-btn" onclick="selectLoginRole2('consultor')" id="roleBtn2Consultor">👁 Consultor</div>
+
+    <!-- Sign In Mode -->
+    <div id="authSignIn">
+      <input id="authEmail" type="email" placeholder="Correo electrónico" autocomplete="email">
+      <input id="authPassword" type="password" placeholder="Contraseña" autocomplete="current-password">
+      <div class="role-select" id="loginRoleSelect">
+        <div class="role-btn" onclick="selectLoginRole('admin')" id="roleBtnAdmin">👨‍💼 Administrador</div>
+        <div class="role-btn" onclick="selectLoginRole('consultor')" id="roleBtnConsultor">👁 Consultor</div>
       </div>
-      <button class="btn btn-primary" onclick="loginWithPassword()">Iniciar Sesión</button>
+      <button class="btn btn-primary" onclick="firebaseSignIn()" id="btnSignIn">Iniciar Sesión</button>
+      <p class="auth-switch" style="text-align:center;font-size:.8rem;color:var(--text2);margin-top:.6rem;">¿No tienes cuenta? <a href="#" onclick="showSignUp();return false;">Crear cuenta</a></p>
     </div>
-    <p id="loginError" class="error-text"></p>
+
+    <!-- Sign Up Mode -->
+    <div id="authSignUp" style="display:none;">
+      <input id="signupEmail" type="email" placeholder="Correo electrónico" autocomplete="email">
+      <input id="signupPassword" type="password" placeholder="Contraseña (mín. 6 caracteres)" autocomplete="new-password">
+      <input id="signupPassword2" type="password" placeholder="Confirmar contraseña" autocomplete="new-password">
+      <div class="role-select" id="signupRoleSelect">
+        <div class="role-btn" onclick="selectSignupRole('admin')" id="signupRoleAdmin">👨‍💼 Administrador</div>
+        <div class="role-btn" onclick="selectSignupRole('consultor')" id="signupRoleConsultor">👁 Consultor</div>
+      </div>
+      <button class="btn btn-primary" onclick="firebaseSignUp()" id="btnSignUp">Crear Cuenta</button>
+      <p class="auth-switch" style="text-align:center;font-size:.8rem;color:var(--text2);margin-top:.6rem;">¿Ya tienes cuenta? <a href="#" onclick="showSignIn();return false;">Iniciar sesión</a></p>
+    </div>
+
+    <!-- Anonymous Consultor Mode -->
+    <div style="text-align:center;margin-top:.6rem;">
+      <button class="btn btn-outline" onclick="firebaseAnonSignIn()" style="width:100%;justify-content:center;font-size:.8rem;">👁 Entrar como Consultor (sin cuenta)</button>
+    </div>
+
+    <p id="authError" class="error-text"></p>
   </div>
 </div>
 
 <!-- Top Bar -->
 <div class="top-bar" id="topBar" style="display:none;">
-  <h1>📊 Dashboard de Ventas 2026 <span class="role-badge" id="roleBadge"></span> <span class="sync-indicator" id="syncIndicator"><span class="sync-dot offline" id="syncDot"></span> <span id="syncLabel">Offline</span></span></h1>
+  <h1>📊 Dashboard de Ventas 2026 <span class="role-badge" id="roleBadge"></span> <span class="sync-indicator" id="syncIndicator"><span class="sync-dot offline" id="syncDot"></span> <span id="syncLabel">Offline</span></span> <span id="userEmailBadge" style="font-size:.65rem;background:rgba(255,255,255,.15);padding:1px 8px;border-radius:10px;margin-left:.5rem;"></span></h1>
   <div class="btn-row">
     <label class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;cursor:pointer;">📂 Importar Excel <input type="file" accept=".xlsx,.xls,.csv" multiple onchange="importFiles(this.files)" style="display:none;"></label>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;" onclick="exportAllXLSX()">📥 Exportar XLSX</button>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;" onclick="forceFirebaseSync()">🔄 Sincronizar</button>
     <button class="btn btn-sm" id="btnFirebase" style="background:rgba(255,255,255,.15);color:#fff;" onclick="openFirebaseSetup()">☁️ Firebase</button>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;" onclick="copySharedLink()">🔗 Enlace Consultor</button>
+    <button class="btn btn-sm" style="background:rgba(255,255,255,.25);color:#fff;" onclick="firebaseSignOut()">🚪 Cerrar Sesión</button>
   </div>
 </div>
 
@@ -256,7 +273,7 @@ input.cell-edit:focus{outline:2px solid var(--primary);border-radius:3px;backgro
 /* ===== GLOBALS ===== */
 let ventas=[], inventario=[], devoluciones=[], facturacion=[];
 let CURRENT_ROLE='admin';
-let _selectedLoginRole=null, _selectedLoginRole2=null;
+let _selectedLoginRole=null;
 const _SUC=['Cocula','Culiacán','Monterrey','Exportación'];
 const sucursalColors={Cocula:'#1a5fb4',Culiacán:'#f39c12',Monterrey:'#27ae60',Exportación:'#9b59b6'};
 let firebaseApp=null, firebaseDb=null, firebaseDbRef=null, firebaseConfig=null;
@@ -274,108 +291,248 @@ function showToast(msg,type='info'){
   setTimeout(()=>{t.classList.add('fade-out');setTimeout(()=>t.remove(),350);},3500);
 }
 
-/* ===== AUTH / ROLES ===== */
-function isAuthenticated(){
-  return !!sessionStorage.getItem('promaquila_auth');
-}
-function getCurrentRole(){
-  return sessionStorage.getItem('promaquila_auth')||'admin';
-}
-function isAccessSetUp(){
-  return !!localStorage.getItem('promaquila_pass');
-}
+/* ===== AUTH / ROLES — FIREBASE AUTH ===== */
+var _selectedLoginRole='';
+var _selectedSignupRole='';
+var _firebaseAuthUser=null; // current Firebase Auth user
+var _firebaseAuthRole=null; // role from RTDB
+
+/* --- Role selection UI --- */
 function selectLoginRole(r){
   _selectedLoginRole=r;
   document.getElementById('roleBtnAdmin').classList.toggle('selected',r==='admin');
   document.getElementById('roleBtnConsultor').classList.toggle('selected',r==='consultor');
 }
-function selectLoginRole2(r){
-  _selectedLoginRole2=r;
-  document.getElementById('roleBtn2Admin').classList.toggle('selected',r==='admin');
-  document.getElementById('roleBtn2Consultor').classList.toggle('selected',r==='consultor');
+function selectSignupRole(r){
+  _selectedSignupRole=r;
+  document.getElementById('signupRoleAdmin').classList.toggle('selected',r==='admin');
+  document.getElementById('signupRoleConsultor').classList.toggle('selected',r==='consultor');
 }
-function setupPassword(){
-  const p1=document.getElementById('setupPass').value, p2=document.getElementById('setupPass2').value;
-  const err=document.getElementById('setupError');
-  if(!_selectedLoginRole){err.textContent='Selecciona un rol primero.';return;}
-  if(!p1||p1.length<4){err.textContent='La contraseña debe tener al menos 4 caracteres.';return;}
-  if(p1!==p2){err.textContent='Las contraseñas no coinciden.';return;}
-  localStorage.setItem('promaquila_pass',p1);
-  localStorage.setItem('promaquila_role',_selectedLoginRole);
-  err.textContent='';
-  showToast('Acceso configurado correctamente','success');
-  document.getElementById('loginSetup').style.display='none';
-  document.getElementById('loginEnter').style.display='none';
-  document.getElementById('loginRoleSelect').style.display='none';
-  document.getElementById('loginPass').parentElement.style.display='block';
-  document.getElementById('loginPass').style.display='block';
-  // Auto-enter
-  sessionStorage.setItem('promaquila_auth',_selectedLoginRole);
-  enterDashboard();
+
+/* --- Toggle sign-in / sign-up views --- */
+function showSignIn(){
+  document.getElementById('authSignIn').style.display='block';
+  document.getElementById('authSignUp').style.display='none';
+  document.getElementById('authError').textContent='';
 }
-function loginWithPassword(){
-  const p=document.getElementById('loginPassInput').value;
-  const stored=localStorage.getItem('promaquila_pass');
-  const err=document.getElementById('loginError');
-  if(!p){err.textContent='Ingresa tu contraseña.';return;}
-  if(p!==stored){err.textContent='Contraseña incorrecta.';return;}
-  if(!_selectedLoginRole2){err.textContent='Selecciona tu rol.';return;}
-  sessionStorage.setItem('promaquila_auth',_selectedLoginRole2);
-  err.textContent='';
-  enterDashboard();
+function showSignUp(){
+  document.getElementById('authSignIn').style.display='none';
+  document.getElementById('authSignUp').style.display='block';
+  document.getElementById('authError').textContent='';
 }
-function enterDashboard(){
-  CURRENT_ROLE=getCurrentRole();
+
+/* --- Firebase Auth: Sign In --- */
+function firebaseSignIn(){
+  var email=document.getElementById('authEmail').value.trim();
+  var pass=document.getElementById('authPassword').value;
+  var errEl=document.getElementById('authError');
+  errEl.textContent='';
+  if(!email){errEl.textContent='Ingresa tu correo electrónico.';return;}
+  if(!pass){errEl.textContent='Ingresa tu contraseña.';return;}
+  if(!_selectedLoginRole){errEl.textContent='Selecciona un rol (Administrador o Consultor).';return;}
+  document.getElementById('btnSignIn').disabled=true;
+  document.getElementById('authSignIn').classList.add('auth-loading');
+  if(!firebaseApp){initFirebase();}
+  firebase.auth().signInWithEmailAndPassword(email,pass).then(function(cred){
+    console.log('[Auth] ✅ Sesión iniciada:',cred.user.email);
+    // Role will be set via onAuthStateChanged -> loadUserRole -> enterDashboard
+  }).catch(function(error){
+    console.error('[Auth] ❌ Error signIn:',error);
+    var msg=error.code==='auth/user-not-found'?'No existe una cuenta con ese correo.':
+           error.code==='auth/wrong-password'?'Contraseña incorrecta.':
+           error.code==='auth/invalid-email'?'Correo electrónico inválido.':
+           error.code==='auth/too-many-requests'?'Demasiados intentos. Espera un momento e intenta de nuevo.':
+           'Error: '+error.message;
+    errEl.textContent=msg;
+    document.getElementById('btnSignIn').disabled=false;
+    document.getElementById('authSignIn').classList.remove('auth-loading');
+  });
+}
+
+/* --- Firebase Auth: Sign Up --- */
+function firebaseSignUp(){
+  var email=document.getElementById('signupEmail').value.trim();
+  var pass=document.getElementById('signupPassword').value;
+  var pass2=document.getElementById('signupPassword2').value;
+  var errEl=document.getElementById('authError');
+  errEl.textContent='';
+  if(!email){errEl.textContent='Ingresa un correo electrónico.';return;}
+  if(!pass||pass.length<6){errEl.textContent='La contraseña debe tener al menos 6 caracteres.';return;}
+  if(pass!==pass2){errEl.textContent='Las contraseñas no coinciden.';return;}
+  if(!_selectedSignupRole){errEl.textContent='Selecciona un rol (Administrador o Consultor).';return;}
+  document.getElementById('btnSignUp').disabled=true;
+  document.getElementById('authSignUp').classList.add('auth-loading');
+  if(!firebaseApp){initFirebase();}
+  firebase.auth().createUserWithEmailAndPassword(email,pass).then(function(cred){
+    console.log('[Auth] ✅ Cuenta creada:',cred.user.email);
+    // Save role to RTDB
+    var uid=cred.user.uid;
+    var roleRef=firebase.database().ref('promaquila/users/'+uid+'/role');
+    roleRef.set(_selectedSignupRole).then(function(){
+      console.log('[Auth] ✅ Rol guardado en RTDB:',_selectedSignupRole);
+      showToast('✅ Cuenta creada exitosamente','success');
+    }).catch(function(e){
+      console.error('[Auth] ⚠️ Error guardando rol en RTDB:',e);
+      // Still proceed — role will default to the one selected
+    });
+  }).catch(function(error){
+    console.error('[Auth] ❌ Error signUp:',error);
+    var msg=error.code==='auth/email-already-in-use'?'Ya existe una cuenta con ese correo.':
+           error.code==='auth/weak-password'?'La contraseña es muy débil (mín. 6 caracteres).':
+           error.code==='auth/invalid-email'?'Correo electrónico inválido.':
+           'Error: '+error.message;
+    errEl.textContent=msg;
+    document.getElementById('btnSignUp').disabled=false;
+    document.getElementById('authSignUp').classList.remove('auth-loading');
+  });
+}
+
+/* --- Firebase Auth: Anonymous Sign In (Consultor without account) --- */
+function firebaseAnonSignIn(){
+  var errEl=document.getElementById('authError');
+  errEl.textContent='';
+  if(!firebaseApp){initFirebase();}
+  firebase.auth().signInAnonymously().then(function(cred){
+    console.log('[Auth] ✅ Consultor anónimo:',cred.user.uid);
+    // Set role as consultor in RTDB
+    var roleRef=firebase.database().ref('promaquila/users/'+cred.user.uid+'/role');
+    roleRef.set('consultor').catch(function(e){console.warn('[Auth] No se pudo guardar rol anónimo:',e);});
+    showToast('👁 Sesión de Consultor activa','success');
+  }).catch(function(error){
+    console.error('[Auth] ❌ Error anónimo:',error);
+    errEl.textContent='Error al entrar como consultor: '+error.message;
+  });
+}
+
+/* --- Firebase Auth: Sign Out --- */
+function firebaseSignOut(){
+  if(!confirm('¿Cerrar sesión?'))return;
+  firebase.auth().signOut().then(function(){
+    console.log('[Auth] ✅ Sesión cerrada');
+    showToast('👋 Sesión cerrada','info');
+    // Reset UI
+    document.getElementById('topBar').style.display='none';
+    document.getElementById('tabBar').style.display='none';
+    document.getElementById('mainContent').style.display='none';
+    document.getElementById('loginOverlay').style.display='flex';
+    document.getElementById('authEmail').value='';
+    document.getElementById('authPassword').value='';
+    document.getElementById('authError').textContent='';
+    showSignIn();
+    // Clear local data references
+    ventas=[];inventario=[];devoluciones=[];facturacion=[];
+    // Detach Firebase listeners
+    if(firebaseDbRef){try{firebaseDbRef.off();}catch(e){}}
+  }).catch(function(error){
+    console.error('[Auth] ❌ Error al cerrar sesión:',error);
+    showToast('Error al cerrar sesión','error');
+  });
+}
+
+/* --- Load user role from RTDB --- */
+function loadUserRole(uid,callback){
+  if(!firebaseDbRef){
+    // Firebase not yet initialized — try after init
+    var checkInterval=setInterval(function(){
+      if(firebaseDbRef){
+        clearInterval(checkInterval);
+        loadUserRole(uid,callback);
+      }
+    },300);
+    // Timeout after 5s — default to consultor
+    setTimeout(function(){clearInterval(checkInterval);callback('consultor');},5000);
+    return;
+  }
+  var roleRef=firebase.database().ref('promaquila/users/'+uid+'/role');
+  roleRef.once('value').then(function(snap){
+    var role=snap.val();
+    if(role==='admin'||role==='consultor'){
+      console.log('[Auth] ✅ Rol desde RTDB:',role);
+      callback(role);
+    }else{
+      console.log('[Auth] ⚠️ Sin rol en RTDB, usando consultor por defecto');
+      callback('consultor');
+    }
+  }).catch(function(e){
+    console.error('[Auth] ❌ Error leyendo rol:',e);
+    callback('consultor');
+  });
+}
+
+/* --- onAuthStateChanged: the central auth listener --- */
+function setupAuthListener(){
+  if(!firebaseApp){return;}
+  if(setupAuthListener._installed){return;}
+  setupAuthListener._installed=true;
+  firebase.auth().onAuthStateChanged(function(user){
+    console.log('[Auth] onAuthStateChanged — user:',user?user.email||'(anonymous '+user.uid+')':'null');
+    if(user){
+      _firebaseAuthUser=user;
+      // Extract Firebase config from URL hash if present (for shared links)
+      var fbFromUrl=extractFirebaseConfigFromUrl();
+      if(fbFromUrl){
+        saveFirebaseConfig(fbFromUrl);
+        console.log('[Auth] Firebase config recibido desde enlace compartido');
+        showToast('☁️ Configuración Firebase recibida','success');
+      }
+      // Load role from RTDB, then enter dashboard
+      loadUserRole(user.uid,function(role){
+        _firebaseAuthRole=role;
+        // If user manually selected a role during sign-in and no role in RTDB, use selected
+        if(_selectedLoginRole && role==='consultor' && _selectedLoginRole==='admin'){
+          // User claims admin but RTDB says consultor — trust RTDB for security
+          console.log('[Auth] ⚠️ Usuario seleccionó admin pero RTDB dice consultor — se usa consultor');
+        }
+        enterDashboardWithAuth(user,role);
+      });
+    }else{
+      _firebaseAuthUser=null;
+      _firebaseAuthRole=null;
+      // Show login overlay
+      document.getElementById('loginOverlay').style.display='flex';
+      document.getElementById('topBar').style.display='none';
+      document.getElementById('tabBar').style.display='none';
+      document.getElementById('mainContent').style.display='none';
+    }
+  });
+}
+
+/* --- Enter dashboard with Firebase Auth --- */
+function enterDashboardWithAuth(user,role){
+  CURRENT_ROLE=role;
+  sessionStorage.setItem('promaquila_auth',role);
   document.getElementById('loginOverlay').style.display='none';
   document.getElementById('topBar').style.display='flex';
   document.getElementById('tabBar').style.display='flex';
   document.getElementById('mainContent').style.display='block';
-  document.getElementById('roleBadge').textContent=CURRENT_ROLE==='admin'?'Administrador':'Consultor';
+  document.getElementById('roleBadge').textContent=role==='admin'?'Administrador':'Consultor';
+  // Show user email or "Anónimo"
+  var emailBadge=document.getElementById('userEmailBadge');
+  if(emailBadge){
+    emailBadge.textContent=user.isAnonymous?'Anónimo':user.email;
+  }
   applyRolePermissions();
   loadFromLocal();
   initFirebase();
   renderAll();
+  // Re-enable buttons after sign-in
+  document.getElementById('btnSignIn').disabled=false;
+  document.getElementById('btnSignUp').disabled=false;
+  document.getElementById('authSignIn').classList.remove('auth-loading');
+  document.getElementById('authSignUp').classList.remove('auth-loading');
 }
 
-function initAccessControl(){
-  if(isAuthenticated()){
-    enterDashboard();
-    return;
-  }
-  /* Consultor shared link — NO PASSWORD NEEDED */
-  const urlParams=new URLSearchParams(window.location.search);
-  if(urlParams.get('mode')==='consultor'){
-    /* *** CRITICAL FIX: Extract Firebase config from URL hash and save to localStorage *** */
-    const fbFromUrl=extractFirebaseConfigFromUrl();
-    if(fbFromUrl){
-      saveFirebaseConfig(fbFromUrl);
-      console.log('Firebase config recibido desde enlace compartido — guardado en localStorage');
-      showToast('☁️ Configuración Firebase recibida desde el enlace','success');
-    }
-    sessionStorage.setItem('promaquila_auth','consultor');
-    CURRENT_ROLE='consultor';
-    enterDashboard();
-    /* If Firebase listener doesn't fire within 10 seconds, warn user */
-    _firebaseTimeout=setTimeout(()=>{
-      if(!_firebaseDataReceived){
-        showToast('⚠️ No se recibieron datos de la nube en 10s. Verifica Firebase.','warn');
-        updateSyncIndicator('offline');
-      }
-    },10000);
-    return;
-  }
-  if(isAccessSetUp()){
-    document.getElementById('loginSetup').style.display='none';
-    document.getElementById('loginEnter').style.display='none';
-    document.getElementById('loginRoleSelect').style.display='none';
-    document.getElementById('loginPass').style.display='block';
-  }else{
-    document.getElementById('loginSetup').style.display='block';
-    document.getElementById('loginRoleSelect').style.display='block';
-    document.getElementById('loginEnter').style.display='block';
-  }
-  document.getElementById('loginOverlay').style.display='flex';
+/* --- Legacy compatibility --- */
+function isAuthenticated(){
+  return !!(_firebaseAuthUser || sessionStorage.getItem('promaquila_auth'));
 }
+function getCurrentRole(){
+  return _firebaseAuthRole || sessionStorage.getItem('promaquila_auth') || 'consultor';
+}
+
+/* --- Old consultor URL mode — redirect to anonymous auth --- */
+function isAccessSetUp(){return true;} // always true with Firebase Auth
+
 
 function applyRolePermissions(){
   if(CURRENT_ROLE==='consultor'){
@@ -385,6 +542,39 @@ function applyRolePermissions(){
     document.getElementById('btnFirebase').style.display='';
     document.getElementById('mainContent').classList.remove('consultor-readonly');
   }
+}
+
+/* ===== INIT ACCESS CONTROL — now uses Firebase Auth ===== */
+function initAccessControl(){
+  // Show login overlay by default
+  document.getElementById('loginOverlay').style.display='flex';
+  
+  // Check for shared consultor link
+  var urlParams=new URLSearchParams(window.location.search);
+  if(urlParams.get('mode')==='consultor'){
+    // Extract Firebase config from URL hash if present
+    var fbFromUrl=extractFirebaseConfigFromUrl();
+    if(fbFromUrl){
+      saveFirebaseConfig(fbFromUrl);
+      console.log('Firebase config recibido desde enlace compartido');
+      showToast('☁️ Configuración Firebase recibida desde el enlace','success');
+    }
+    // Use anonymous auth for consultor links
+    if(firebaseApp){
+      firebase.auth().signInAnonymously().then(function(cred){
+        console.log('[Auth] ✅ Consultor anónimo via enlace:',cred.user.uid);
+        var roleRef=firebase.database().ref('promaquila/users/'+cred.user.uid+'/role');
+        roleRef.set('consultor').catch(function(e){});
+      }).catch(function(e){
+        console.error('[Auth] ❌ Error anónimo via enlace:',e);
+        showToast('Error al entrar como consultor','error');
+      });
+    }
+    return;
+  }
+  
+  // Initialize Firebase — setupAuthListener() is called inside initFirebase()
+  initFirebase();
 }
 
 /* ===== TABS ===== */
@@ -603,6 +793,14 @@ function initFirebase(){
     console.log('[Firebase] initFirebase() — sin configuración Firebase en localStorage');
     updateSyncIndicator('offline');
     showToast('📱 Sin configuración Firebase — datos solo locales','warn');
+    // Even without RTDB config, Auth still works
+    if(!firebaseApp){
+      // Use a minimal config just for Auth
+      var authOnlyConfig={apiKey:'AIzaSyAcr6XuBLirESm5fhw4V7kfIYDLstBnyKg',projectId:'erp-promaquila'};
+      firebaseApp=firebase.initializeApp(authOnlyConfig);
+      console.log('[Firebase] initFirebase() — ✅ Firebase app inicializada (solo Auth, sin RTDB)');
+    }
+    setupAuthListener();
     return;
   }
   /* Auto-fill databaseURL if missing */
@@ -631,6 +829,7 @@ function initFirebase(){
       }
     });
     attachFirebaseListener();
+    setupAuthListener();
   }catch(e){
     console.error('[Firebase] initFirebase() — ❌ error de inicialización:',e);
     /* If auto-generated URL is wrong, try the old pattern */
@@ -646,6 +845,7 @@ function initFirebase(){
         firebaseDbRef=firebaseDb.ref('promaquila');
         updateSyncIndicator('syncing');
         attachFirebaseListener();
+        setupAuthListener();
         showToast('🔗 Conectado con URL alternativa','info');
         return;
       }catch(e3){
