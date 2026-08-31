@@ -631,6 +631,7 @@ function mergeData(arr,newRows,type){
 /* ===== IMPORT EXCEL ===== */
 function importFiles(files){
   if(!files||!files.length)return;
+  console.log('[Import] Iniciando importación de',files.length,'archivo(s)');
   let totalAdded=0, processed=0;
   const count=files.length;
   for(const f of files){
@@ -641,11 +642,12 @@ function importFiles(files){
         for(const sheetName of wb.SheetNames){
           const ws=wb.Sheets[sheetName];
           const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-          if(raw.length<4)continue;
+          if(raw.length<2)continue;
           /* Check for CONTPAQ format (3 metadata rows) */
           const nonEmpty0=raw[0].filter(c=>c!==''&&c!==null&&c!==undefined).length;
           const nonEmpty1=raw[1].filter(c=>c!==''&&c!==null&&c!==undefined).length;
           const hasContpaqMeta=raw.length>3&&nonEmpty0<=2&&nonEmpty1<=2;
+          console.log('[Import] Hoja:',sheetName,'filas:',raw.length,'nonEmpty0:',nonEmpty0,'nonEmpty1:',nonEmpty1,'hasContpaqMeta:',hasContpaqMeta,'hdrRow:',hasContpaqMeta?2:0,'dataStart:',hasContpaqMeta?3:1);
           const dataStart=hasContpaqMeta?3:1;
           const hdrRow=hasContpaqMeta?2:0;
           /* Detect type by header row */
@@ -664,21 +666,22 @@ function importFiles(files){
             else if(sn.includes('devolucion')||sn.includes('dev'))type='devoluciones';
             else if(sn.includes('factura')||sn.includes('fact'))type='facturacion';
           }
-          if(!type)continue;
+          if(!type){console.log('[Import] Hoja:',sheetName,'— tipo no detectado, omitiendo');continue;}
+          console.log('[Import] Hoja:',sheetName,'tipo detectado:',type,'encabezados:',raw[hdrRow]);
           const hdrs=raw[hdrRow]||[];
           const rows=raw.slice(dataStart).filter(r=>r.some(c=>c!==''));
           const mapped=rows.map(r=>{
             const obj={};
             hdrs.forEach((h,i)=>{obj[h]=(r[i]!==undefined&&r[i]!==null)?r[i]:'';});
-            /* Standardize keys */
-            obj.folio=obj.folio||obj.Folio||obj.FOLIO||'';
-            obj.fecha=fmtDate(obj.fecha||obj.Fecha||obj.FECHA||obj.fecha_documento||'');
-            obj.cliente=obj.cliente||obj.Cliente||obj.CLIENTE||obj.Nombre||'';
-            obj.producto=obj.producto||obj.Producto||obj.PRODUCTO||obj.Artículo||obj.Articulo||'';
-            obj.cantidad=obj.cantidad||obj.Cantidad||obj.CANTIDAD||obj.Cant||0;
-            obj.precio=obj.precio||obj.Precio||obj.PRECIO||obj.Precio_Unitario||0;
-            obj.total=obj.total||obj.Total||obj.TOTAL||obj.Importe||0;
-            obj.sucursal=obj.sucursal||obj.Sucursal||obj.SUCURSAL||'Cocula';
+            /* Standardize keys — use ?? instead of || to preserve 0 values */
+            obj.folio=obj.folio??obj.Folio??obj.FOLIO??'';
+            obj.fecha=fmtDate(obj.fecha??obj.Fecha??obj.FECHA??obj.fecha_documento??'');
+            obj.cliente=obj.cliente??obj.Cliente??obj.CLIENTE??obj.Nombre??'';
+            obj.producto=obj.producto??obj.Producto??obj.PRODUCTO??obj.Artículo??obj.Articulo??'';
+            obj.cantidad=obj.cantidad??obj.Cantidad??obj.CANTIDAD??obj.Cant??0;
+            obj.precio=obj.precio??obj.Precio??obj.PRECIO??obj.Precio_Unitario??0;
+            obj.total=obj.total??obj.Total??obj.TOTAL??obj.Importe??0;
+            obj.sucursal=obj.sucursal??obj.Sucursal??obj.SUCURSAL??'Cocula';
             /* Fix sucursal */
             const s=(obj.sucursal+'').trim();
             if(_SUC.map(s2=>s2.toLowerCase()).includes(s.toLowerCase())){
@@ -695,6 +698,7 @@ function importFiles(files){
           else if(type==='inventario') added=mergeData(inventario,mapped,'inventario');
           else if(type==='devoluciones') added=mergeData(devoluciones,mapped,'devoluciones');
           else if(type==='facturacion') added=mergeData(facturacion,mapped,'facturacion');
+          console.log('[Import] Hoja:',sheetName,'mapeados:',mapped.length,'añadidos:',added);
           totalAdded+=added;
         }
       }catch(err){
@@ -705,7 +709,10 @@ function importFiles(files){
       if(processed===count){
         saveLocal(); /* saveLocal() already calls pushToFirebase() */
         renderAll();
-        if(totalAdded===0) showToast('⚠️ No se detectaron hojas válidas. Asegúrate que los encabezados contengan “folio”, “cliente”, etc.','warn');
+        if(totalAdded===0){
+          console.warn('[Import] ⚠️ totalAdded=0 — revisa los logs [Import] arriba para detalles');
+          showToast('⚠️ No se detectaron registros nuevos. Revisa la consola (F12) para detalles. Asegúrate que los encabezados contengan “folio”, “cliente”, etc.','warn');
+        }
         else showToast('✅ Se importaron '+totalAdded+' registros nuevos','success');
       }
     };
@@ -952,7 +959,8 @@ function pushToFirebase(){
   const data={ventas,inventario,devoluciones,facturacion};
   console.log('[Firebase] pushToFirebase() — enviando datos a la nube',{ventas:ventas.length,inventario:inventario.length,devoluciones:devoluciones.length,facturacion:facturacion.length});
   firebaseDbRef.update(data).then(()=>{
-    _firebaseWriteInProgress=false;
+    /* Keep guard on for 3s after write completes to prevent late Firebase listener echoes */
+    setTimeout(()=>{_firebaseWriteInProgress=false;},3000);
     updateSyncIndicator('online');
     console.log('[Firebase] pushToFirebase() — ✅ datos guardados en la nube correctamente');
   }).catch(e=>{
