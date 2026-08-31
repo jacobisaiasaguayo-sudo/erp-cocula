@@ -642,8 +642,14 @@ function importFiles(files){
           const ws=wb.Sheets[sheetName];
           const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
           if(raw.length<4)continue;
+          /* Check for CONTPAQ format (3 metadata rows) */
+          const nonEmpty0=raw[0].filter(c=>c!==''&&c!==null&&c!==undefined).length;
+          const nonEmpty1=raw[1].filter(c=>c!==''&&c!==null&&c!==undefined).length;
+          const hasContpaqMeta=raw.length>3&&nonEmpty0<=2&&nonEmpty1<=2;
+          const dataStart=hasContpaqMeta?3:1;
+          const hdrRow=hasContpaqMeta?2:0;
           /* Detect type by header row */
-          const headers=raw[2]||raw[0]||[];
+          const headers=raw[hdrRow]||[];
           const hLower=headers.map(h=>(h+'').toLowerCase().trim());
           let type=null, startRow=3;
           if(hLower.some(h=>h.includes('folio'))&&hLower.some(h=>h.includes('cliente'))) type='ventas';
@@ -659,10 +665,6 @@ function importFiles(files){
             else if(sn.includes('factura')||sn.includes('fact'))type='facturacion';
           }
           if(!type)continue;
-          /* Check for CONTPAQ format (3 metadata rows) */
-          const hasContpaqMeta=raw.length>3&&raw[0].length<=2&&raw[1].length<=2;
-          const dataStart=hasContpaqMeta?3:1;
-          const hdrRow=hasContpaqMeta?2:0;
           const hdrs=raw[hdrRow]||[];
           const rows=raw.slice(dataStart).filter(r=>r.some(c=>c!==''));
           const mapped=rows.map(r=>{
@@ -703,7 +705,8 @@ function importFiles(files){
       if(processed===count){
         saveLocal(); /* saveLocal() already calls pushToFirebase() */
         renderAll();
-        showToast('✅ Se importaron '+totalAdded+' registros nuevos','success');
+        if(totalAdded===0) showToast('⚠️ No se detectaron hojas válidas. Asegúrate que los encabezados contengan “folio”, “cliente”, etc.','warn');
+        else showToast('✅ Se importaron '+totalAdded+' registros nuevos','success');
       }
     };
     reader.readAsArrayBuffer(f);
@@ -717,7 +720,7 @@ function toNum(v){
 }
 function fmtDate(v){
   if(!v)return '';
-  if(v instanceof Date){const y=v.getFullYear(),m=''+(v.getMonth()+1).padStart(2,'0'),d=''+v.getDate().padStart(2,'0');return y+'-'+m+'-'+d;}
+  if(v instanceof Date){const y=v.getFullYear(),m=String(v.getMonth()+1).padStart(2,'0'),d=String(v.getDate()).padStart(2,'0');return y+'-'+m+'-'+d;}
   const s=''+v;
   /* Try dd/mm/yyyy */
   const m1=s.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
